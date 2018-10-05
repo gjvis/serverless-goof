@@ -1,19 +1,20 @@
 'use strict';
 
 const uuid = require('uuid');
-const AWS = require('aws-sdk'); // eslint-disable-line import/no-extraneous-dependencies
 const hms = require('humanize-ms');
 const ms = require('ms');
 const fs = require('fs');
+const Datastore = require('@google-cloud/datastore');
 
-const dynamoDb = new AWS.DynamoDB.DocumentClient();
+const datastore = new Datastore({ projectId: process.env.GCLOUD_PROJECT });
+const kind = 'Todo';
 
-module.exports.create = (event, context, callback) => {
+module.exports = (req, res) => {
   const timestamp = new Date().getTime();
-  const data = JSON.parse(event.body);
+  const data = JSON.parse(req.body);
   if (typeof data.text !== 'string') {
     console.error('Validation Failed');
-    callback(new Error('Couldn\'t create the todo item.'));
+    req.status(400).send('Couldn\'t create the todo item.');
     return;
   }
 
@@ -22,10 +23,15 @@ module.exports.create = (event, context, callback) => {
   // For no good reason, write results to a temp files
   fs.writeFile("/tmp/goof-todos-create." + Math.random(),todoTxt);
 
+  // write the todo to the database
+  const todoId = uuid.v1();
+  const todoKey = datastore.key([kind, todoId]);
+
+  // Prepares the new todo entity
   const params = {
-    TableName: process.env.DYNAMODB_TABLE,
-    Item: {
-      id: uuid.v1(),
+    key: todoKey,
+    data: {
+      id: todoId,
       text: todoTxt,
       checked: false,
       createdAt: timestamp,
@@ -33,22 +39,16 @@ module.exports.create = (event, context, callback) => {
     },
   };
 
-  // write the todo to the database
-  dynamoDb.put(params, (error) => {
-    // handle potential errors
-    if (error) {
-      console.error(error);
-      callback(new Error('Couldn\'t create the todo item.'));
-      return;
-    }
-
-    // create a response
-    const response = {
-      statusCode: 200,
-      body: JSON.stringify(params.Item),
-    };
-    callback(null, response);
-  });
+  datastore
+    .insert(params)
+    .then(() => {
+      // create a response
+      res.status(200).json(params.data);
+    })
+    .catch(err => {
+      console.error(err);
+      res.status(500).send('Couldn\'t create the todo item.');
+    });
 };
 
 function parse(todo) {

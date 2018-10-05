@@ -1,12 +1,13 @@
 'use strict';
 
-const AWS = require('aws-sdk'); // eslint-disable-line import/no-extraneous-dependencies
+const Datastore = require('@google-cloud/datastore');
 
-const dynamoDb = new AWS.DynamoDB.DocumentClient();
+const datastore = new Datastore({ projectId: process.env.GCLOUD_PROJECT });
+const kind = 'Todo';
 
-module.exports.update = (event, context, callback) => {
+module.exports = (req, res) => {
   const timestamp = new Date().getTime();
-  const data = JSON.parse(event.body);
+  const data = JSON.parse(req.body);
 
   // validation
   if (typeof data.text !== 'string' || typeof data.checked !== 'boolean') {
@@ -15,37 +16,28 @@ module.exports.update = (event, context, callback) => {
     return;
   }
 
-  const params = {
-    TableName: process.env.DYNAMODB_TABLE,
-    Key: {
-      id: event.pathParameters.id,
-    },
-    ExpressionAttributeNames: {
-      '#todo_text': 'text',
-    },
-    ExpressionAttributeValues: {
-      ':text': data.text,
-      ':checked': data.checked,
-      ':updatedAt': timestamp,
-    },
-    UpdateExpression: 'SET #todo_text = :text, checked = :checked, updatedAt = :updatedAt',
-    ReturnValues: 'ALL_NEW',
-  };
+  const todoId = req.params.todoId;
+
+  const todoKey = datastore.key([kind, todoId]);
+  let todoData;
 
   // update the todo in the database
-  dynamoDb.update(params, (error, result) => {
-    // handle potential errors
-    if (error) {
-      console.error(error);
-      callback(new Error('Couldn\'t update the todo item.'));
-      return;
-    }
+  datastore
+    .get(todoKey)
+    .then(results => {
+      todoData = results[0];
+      todoData.text =  data.text;
+      todoData.checked = data.checked;
+      todoData.updatedAt = timestamp;
 
-    // create a response
-    const response = {
-      statusCode: 200,
-      body: JSON.stringify(result.Attributes),
-    };
-    callback(null, response);
-  });
+      return datastore.update({ key: todoKey, data: todoData});
+    })
+    .then(() => {
+      // create a response
+      res.status(200).json(todoData);
+    })
+    .catch(err => {
+      console.error(err);
+      res.status(500).send('Couldn\'t update the todo item.');
+    });
 };

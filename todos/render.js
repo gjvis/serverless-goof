@@ -1,60 +1,67 @@
 'use strict';
 
-const AWS = require('aws-sdk'); // eslint-disable-line import/no-extraneous-dependencies
+const Datastore = require('@google-cloud/datastore');
 const fs = require('fs');
-const qs = require('qs');
+// const qs = require('qs');
 const dust = require('dustjs-helpers');
 
-const dynamoDb = new AWS.DynamoDB.DocumentClient();
-const params = {
-  TableName: process.env.DYNAMODB_TABLE,
-};
+const datastore = new Datastore({ projectId: process.env.GCLOUD_PROJECT });
+const kind = 'Todo';
+const allTodos = datastore.createQuery(kind).order('createdAt');
 
-module.exports.render = (event, context, callback) => {
+module.exports = (req, res) => {
 
   // fetch all todos from the database
-  dynamoDb.scan(params, (error, result) => {
-    // handle potential errors
-    if (error) {
+  datastore
+    .runQuery(allTodos)
+    .then(results => {
+      const allTodos = results[0];
+
+      // For no good reason, write results to a temp files
+      fs.writeFile("/tmp/goof-todos-render." + Math.random(),JSON.stringify(allTodos));
+
+      var templateFile = './todos/render.dust';
+      return new Promise((resolve, reject) => {
+        fs.readFile(templateFile, function(err, data) {
+          if (err) {
+            const error = new Error("Error 404");
+            error.code = 404;
+            reject(error);
+          } else {
+            // Interpret the EJS template server side to produce HTML content
+            console.log("data:" + JSON.stringify(allTodos));
+            // Prepare the dust template (really should be stored ahead of time...)
+            var compiled = dust.compile(data.toString(), "dustTemplate");
+            dust.loadSource(compiled);
+
+            // Parse the query string
+            // var params = qs.parse(req.query); // GCF does this already
+            var params = req.query;
+            console.log("Parsed parameters: " + JSON.stringify(params));
+            // Invoke the template
+            dust.render("dustTemplate",
+              {
+                title: 'Goof TODO',
+                subhead: 'Vulnerabilities at their best',
+                device: params.device,
+                todos: allTodos
+              },
+              function(error, html) {
+                  if (error) {
+                    console.error(error);
+                    reject(error);
+                  } else {
+                    res.status(200).send(html);
+                    resolve();
+                  }
+              } );
+          }
+        });
+      });
+    })
+    .catch(error => {
+      // handle potential errors
       console.error(error);
-      callback(new Error('Couldn\'t fetch the todos.'));
-      return;
-    }
-
-    // For no good reason, write results to a temp files
-    fs.writeFile("/tmp/goof-todos-render." + Math.random(),JSON.stringify(result.Items));
-
-    var templateFile = './todos/render.dust';
-    fs.readFile(templateFile, function(err, data) {
-      if (err) {
-        callback("Error 404");
-      } else {
-        // Interpret the EJS template server side to produce HTML content
-        console.log("data:" + JSON.stringify(result.Items));
-        // Prepare the dust template (really should be stored ahead of time...)
-        var compiled = dust.compile(data.toString(), "dustTemplate");
-        dust.loadSource(compiled);
-
-        // Parse the query string
-        var params = qs.parse(event.query);
-        console.log("Parsed parameters: " + JSON.stringify(params));
-        // Invoke the template
-        dust.render("dustTemplate",
-          {
-            title: 'Goof TODO',
-            subhead: 'Vulnerabilities at their best',
-            device: params.device,
-            todos: result.Items
-          },
-          function(error, html) {
-              if (err) {
-                console.error(error);
-              } else {
-                // Return the HTML wrapped in JSON to preserve encoding
-                callback(null, {data: html});
-              }
-          } );
-      }
-    } );
-  } );
+      res.status(error.code || 500).send('Couldn\'t fetch the todos.');
+    });
 };

@@ -1,27 +1,22 @@
 'use strict';
 
-const AWS = require('aws-sdk'); // eslint-disable-line import/no-extraneous-dependencies
+const Datastore = require('@google-cloud/datastore');
 
-const dynamoDb = new AWS.DynamoDB.DocumentClient();
-const params = {
-  TableName: process.env.DYNAMODB_TABLE,
-};
+const datastore = new Datastore({ projectId: process.env.GCLOUD_PROJECT });
 
-module.exports.list = (event, context, callback) => {
+// matches the "kind" in ./create.js
+const kind = 'Todo';
+const allTodos = datastore.createQuery(kind).order('createdAt');
+
+module.exports= (req, res) => {
   // fetch all todos from the database
-  dynamoDb.scan(params, (error, result) => {
-    // handle potential errors
-    if (error) {
+  datastore
+    .runQuery(allTodos)
+    .then(results => {
+      res.status(200).json(results[0]);
+    })
+    .catch(error => {
       console.error(error);
-      callback(new Error('Couldn\'t fetch the todos.'));
-      return;
-    }
-
-    // create a response
-    const response = {
-      statusCode: 200,
-      body: JSON.stringify(result.Items),
-    };
-    callback(null, response);
-  });
+      res.status(500).send('Couldn\'t fetch the todos.');
+    });
 };
