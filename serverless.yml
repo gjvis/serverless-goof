@@ -20,11 +20,17 @@ functions:
     events:
       - http: todos
 
-  # internalBackup:
-  #   handler: internalBackup
-  #   events:
-  #     - event:
-  #         path: admin/backup
+  create:
+    handler: todos/create
+    events:
+      - http: todos/create
+
+  internalBackup:
+    handler: internalBackup
+    events:
+      - event:
+          eventType: providers/cloud.pubsub/eventTypes/topic.publish
+          resource: projects/*/topics/my-topic
 
   # internalRestore:
   #   handler: internalRestore
